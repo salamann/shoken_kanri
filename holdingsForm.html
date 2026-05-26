@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      padding: 15px;
+      font-size: 16px;
+      background-color: #f9f9f9;
+    }
+
+    h3 {
+      font-size: 24px;
+      margin-bottom: 20px;
+      text-align: center;
+      color: #333;
+    }
+
+    .holding-item {
+      background: #fff;
+      padding: 15px;
+      margin-bottom: 15px;
+      border-radius: 10px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+
+    .holding-item label {
+      display: block;
+      margin-bottom: 10px;
+      font-weight: bold;
+      color: #555;
+    }
+
+    .holding-item input[type="number"] {
+      width: 100%;
+      font-size: 18px;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      box-sizing: border-box;
+    }
+
+    button {
+      display: block;
+      width: 100%;
+      font-size: 18px;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      background-color: #4CAF50;
+      color: white;
+      cursor: pointer;
+      margin-top: 10px;
+      box-shadow: 0 3px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    #result {
+      margin-top: 15px;
+      font-size: 16px;
+      color: #333;
+      text-align: center;
+    }
+
+    @media screen and (max-width: 480px) {
+      body {
+        font-size: 18px;
+        padding: 20px;
+      }
+
+      .holding-item input[type="number"] {
+        font-size: 20px;
+        padding: 14px;
+      }
+
+      button {
+        font-size: 20px;
+        padding: 16px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <h3>保有数アップデートフォーム</h3>
+  <form id="holdingsForm">
+    <div id="holdingsContainer"></div>
+    <button type="button" onclick="submitForm()">更新</button>
+  </form>
+
+  <p id="result"></p>
+
+  <script>
+    google.script.run.withSuccessHandler(renderHoldings).getCurrentHoldings();
+
+    function renderHoldings(holdings) {
+      const container = document.getElementById("holdingsContainer");
+      container.innerHTML = '';
+
+      holdings.forEach(h => {
+        const div = document.createElement("div");
+        div.className = 'holding-item';
+        div.innerHTML = `
+          <label>
+            ${h.broker} | ${h.account} | ${h.name} | 現在の保有数: ${h.quantity}
+          </label>
+          <input type="number" name="quantity" 
+                 data-broker="${h.broker}" 
+                 data-account="${h.account}" 
+                 data-name="${h.name}" 
+                 value="${h.quantity}" step="any">
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function submitForm() {
+      const inputs = document.querySelectorAll('input[name="quantity"]');
+      const updates = Array.from(inputs).map(input => ({
+        broker: input.dataset.broker,
+        account: input.dataset.account,
+        name: input.dataset.name,
+        quantity: input.value
+      }));
+
+      google.script.run.withSuccessHandler(function (msg) {
+        document.getElementById("result").innerText = msg;
+      }).updateHoldings(updates);
+    }
+  </script>
+</body>
+
+</html>

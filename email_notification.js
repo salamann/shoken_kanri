@@ -1,31 +1,27 @@
-function sendSheetByMail() {
+function sendReportByMail(sheetName, reportType) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("メール用");
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    throw new Error(`${sheetName} シートが見つかりません`);
+  }
 
   const values = sheet.getDataRange().getDisplayValues();
-  const sheet1 = ss.getSheetByName("まとめ");
-  const charts = sheet1.getCharts();
-  const sheet2 = ss.getSheetByName("時系列円");
-  const charts2 = sheet2.getCharts();
-  const sheet3 = ss.getSheetByName("アセットアロケーション");
-  const charts3 = sheet3.getCharts();
-
+  const chartSheetNames = ["まとめ", "時系列円", "アセットアロケーション"];
 
   const inlineImages = {};
   let comment;
 
   try {
     comment = retryWithBackoff(
-      () => generateComment(),
+      () => generateComment(sheetName, reportType),
       4
     );
   }
   catch (e) {
-
     Logger.log(`AI generation failed: ${e}`);
-
-    comment =
-      "今週のAIコメント生成は利用できませんでした。";
+    comment = reportType === "月報"
+      ? "今月のAIコメント生成は利用できませんでした。"
+      : "今週のAIコメント生成は利用できませんでした。";
   }
 
   let html = `
@@ -95,7 +91,7 @@ function sendSheetByMail() {
   </head>
   <body>
   <div class="container">
-  <h2>投資週報</h2>
+  <h2>投資${reportType}</h2>
 
   <div style="
     background:#f8fafc;
@@ -110,7 +106,7 @@ function sendSheetByMail() {
       margin-bottom:6px;
       color:#1a73e8;
     ">
-      今週のまとめ
+      ${reportType === "月報" ? "今月のまとめ" : "今週のまとめ"}
     </div>
     ${comment}
   </div>
@@ -118,69 +114,44 @@ function sendSheetByMail() {
 
   let chartId = 0;
 
-  // 時系列円シート
-  charts2.forEach((chart2) => {
-    const cid = `chart${chartId++}`;
-    const blob = chart2.getBlob().setName(cid);
+  chartSheetNames.forEach((name) => {
+    const chartSheet = ss.getSheetByName(name);
+    if (!chartSheet) {
+      return;
+    }
 
-    inlineImages[cid] = blob;
+    chartSheet.getCharts().forEach((chart) => {
+      const cid = `chart${chartId++}`;
+      const blob = chart.getBlob().setName(cid);
+      inlineImages[cid] = blob;
 
-    html += `
+      html += `
       <div class="chart">
         <img src="cid:${cid}">
       </div>
     `;
-  });
-
-
-  // まとめシート
-  charts.forEach((chart) => {
-    const cid = `chart${chartId++}`;
-    const blob = chart.getBlob().setName(cid);
-
-    inlineImages[cid] = blob;
-
-    html += `
-      <div class="chart">
-        <img src="cid:${cid}">
-      </div>
-    `;
-  });
-
-  // アセットアロケーションシート
-  charts3.forEach((chart3) => {
-    const cid = `chart${chartId++}`;
-    const blob = chart3.getBlob().setName(cid);
-
-    inlineImages[cid] = blob;
-
-    html += `
-      <div class="chart">
-        <img src="cid:${cid}">
-      </div>
-    `;
+    });
   });
 
   html += '<table>';
 
-  const diffCol = values[0].indexOf("先週比");
+  const diffColNames = ["先週比", "先月比", "前月比"];
+  const diffCol = diffColNames.reduce(
+    (acc, header) => acc >= 0 ? acc : values[0].indexOf(header),
+    -1
+  );
 
   values.forEach((row, i) => {
     html += '<tr>';
 
     row.forEach((cell, col) => {
-
-      // ヘッダ行
       if (i === 0) {
         html += `<th>${cell}</th>`;
         return;
       }
 
       let style = "";
-
-      // 先週比列だけ色付け
       if (col === diffCol) {
-
         if (cell.includes("+")) {
           style = `
             color:#2563eb;
@@ -210,10 +181,9 @@ function sendSheetByMail() {
   </html>
   `;
 
-
   GmailApp.sendEmail(
     EMAIL_TO,
-    "資産週報",
+    `資産${reportType}`,
     "HTMLメールをご覧ください",
     {
       htmlBody: html,
@@ -222,8 +192,16 @@ function sendSheetByMail() {
   );
 }
 
+function sendSheetByMail() {
+  sendReportByMail("週報", "週報");
+}
 
-function generateComment() {
+function sendMonthlyReportByMail() {
+  sendReportByMail("月報", "月報");
+}
+
+
+function generateComment(sheetName = "週報", reportType = "週報") {
 
   const apiKey = PropertiesService
     .getScriptProperties()
@@ -233,7 +211,10 @@ function generateComment() {
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("メール用");
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    throw new Error(`${sheetName} シートが見つかりません`);
+  }
 
   const values = sheet.getDataRange().getDisplayValues();
 
@@ -242,7 +223,11 @@ function generateComment() {
 
   const nameCol = headers.indexOf("商品名");
   const valueCol = headers.indexOf("市場価値円");
-  const diffCol = headers.indexOf("先週比");
+  const diffColNames = ["先週比", "先月比", "前月比"];
+  const diffCol = diffColNames.reduce(
+    (acc, header) => acc >= 0 ? acc : headers.indexOf(header),
+    -1
+  );
 
   // 商品行 (2～11行想定、合計除外)
   const rows = values.slice(1, -1);
@@ -251,15 +236,12 @@ function generateComment() {
   const totalRow = values[values.length - 1];
 
   const totalValue = totalRow[valueCol];
-  const totalDiff = totalRow[diffCol];
+  const totalDiff = diffCol >= 0 ? totalRow[diffCol] : "";
 
-  // 先週比抽出（数値化）
+  // 先週比 / 先月比 抽出（数値化）
   const movers = rows.map(r => {
-
-    const diffText = r[diffCol];
-
+    const diffText = diffCol >= 0 ? r[diffCol] : "";
     const match = diffText.match(/[+-]?¥?([\d,]+)/);
-
     const diff =
       match ?
         Number(match[1].replace(/,/g, '')) *
@@ -274,14 +256,16 @@ function generateComment() {
 
   movers.sort((a, b) => b.diff - a.diff);
 
-  const topGain = movers[0];
-  const topLoss = movers[movers.length - 1];
+  const topGain = movers[0] || { name: "", diff: 0 };
+  const topLoss = movers[movers.length - 1] || { name: "", diff: 0 };
+  const summaryLabel = reportType === "月報" ? "今月のまとめ" : "今週のまとめ";
+  const compareLabel = diffCol >= 0 ? headers[diffCol] : "先週比";
 
   const prompt = `
 あなたは金融レポート編集者です。
 
 以下データを基に、
-投資週報の「今週のまとめ」を
+投資${reportType}の「${summaryLabel}」を
 80〜120字で日本語で書いてください。
 
 条件:
@@ -292,7 +276,7 @@ function generateComment() {
 
 データ:
 総資産: ${totalValue}
-先週比: ${totalDiff}
+${compareLabel}: ${totalDiff}
 
 上昇寄与:
 ${topGain.name} ${topGain.diff}
